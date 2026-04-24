@@ -6,6 +6,9 @@
 ## 🎥 Demo
 ![Demo](demo.gif)
 
+## Preview 
+![Preview](pre.png)
+
 ---
 
 ## 📌 Table of Contents
