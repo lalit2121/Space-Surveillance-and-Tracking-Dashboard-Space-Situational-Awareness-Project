@@ -32,7 +32,7 @@ This Satellite tracking System ingests live Two-Line Element (TLE) sets from [Ce
 
 - Parses and stores 300+ TLE records in SQLite with BSTAR compressed-exponential decoding
 - Propagates orbits via SGP4 with J2 perturbations and atmospheric drag decay
-- Detects conjunctions with KDTree pre-screening, TCA refinement via `scipy.optimize`, and Chan 1D collision probability
+- Detects conjunctions with KDTree pre-screening, TCA refinement via `scipy.optimize`, and Alfano 2D  collision probability
 - Risk thresholds calibrated to NASA CARA / ESA standards (CRITICAL ≥ 1×10⁻⁴)
 - Animated 2D ground track map (Plotly Scattergeo) and 3D ECI globe (Three.js r128)
 - Full REST API with Swagger UI at `/docs`
@@ -71,7 +71,7 @@ This Satellite tracking System ingests live Two-Line Element (TLE) sets from [Ce
 │ ConjunctionSearch    │            │  ExportUtils (CSV/JSON)      │
 │ KDTree screening     │            └─────────────────────────────┘
 │ TCA refinement       │                          │
-│ Chan 1D Pc           │                          │
+│ Alfano 2D Pc           │                          │
 └──────────┬───────────┘                          │
            │ ConjunctionEvent list                │
            └──────────────────────┬───────────────┘
@@ -251,13 +251,38 @@ Propagates all objects over the time horizon at `search_step_hours` resolution. 
 For each candidate pair, uses `scipy.optimize.minimize_scalar` (bounded Brent's method) to find the precise Time of Closest Approach within a ±`refine_window_hours` bracket around the grid minimum.
 
 **Collision Probability:**  
-Chan 1D approximation:
+Alfano 2D Pc approximation:
+Collision probability is estimated using a simplified **Alfano 2D Gaussian approximation**, assuming:
 
-```
-Pc = (HBR² / 2σ²) × exp(−0.5 × (d/σ)²)
-```
+- Gaussian relative position uncertainty  
+- Circular hard-body collision region  
+- Isotropic equivalent covariance (scalar σ)
 
-where `d` is the miss distance at TCA and `σ` is the combined 1D position uncertainty.
+The probability of collision \( P_c \) is computed as:
+
+\[
+P_c \approx
+\begin{cases}
+\frac{\beta^2}{2\alpha^2} \, e^{-\alpha^2/2}, & \text{if } \alpha \ge \beta \\
+\frac{1}{\pi} \left[
+e^{-\alpha^2/2} \cos^{-1}\!\left(\frac{\alpha}{\beta}\right)
++ e^{-\beta^2/2} (\beta - \alpha)
+\right], & \text{if } \alpha < \beta
+\end{cases}
+\]
+
+Where:
+
+- \( \alpha = \dfrac{d}{\sigma} \) — normalized miss distance  
+- \( \beta = \dfrac{R}{\sigma} \) — normalized hard-body radius  
+- \( d \) — miss distance at TCA  
+- \( R \) — combined hard-body radius  
+- \( \sigma \) — equivalent 1σ relative position uncertainty  
+
+This formulation provides a fast, closed-form approximation of the Alfano collision probability model suitable for large catalog screening.
+
+
+---
 
 **Risk thresholds** (NASA CARA / ESA calibrated):
 
