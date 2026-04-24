@@ -1,4 +1,3 @@
-
 """
 Conjunction Detection & Collision Assessment for SSA
 Mahalanobis distance, hard-body radius models, probabilistic risk scoring
@@ -7,7 +6,7 @@ UPDATED:
 - Major speedup: precompute tracks + KDTree candidate generation
 - Parallel pair refinement (ProcessPool or Threads)
 - Keeps structure and outputs compatible with original main script
-- Maintains Chan-1D Pc method by default (same downstream behavior)
+
 """
 
 import os
@@ -19,6 +18,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 from scipy.optimize import minimize_scalar
+from scipy.special import erf
 
 try:
     from scipy.spatial import cKDTree
@@ -110,7 +110,11 @@ class CovarianceModel:
 
     @staticmethod
     def build_covariance_matrix(time_diff_seconds: float, is_velocity: bool = False) -> np.ndarray:
-        sigma = CovarianceModel.velocity_covariance(time_diff_seconds) if is_velocity else CovarianceModel.position_covariance(time_diff_seconds)
+        sigma = (
+            CovarianceModel.velocity_covariance(time_diff_seconds)
+            if is_velocity
+            else CovarianceModel.position_covariance(time_diff_seconds)
+        )
         return np.eye(3) * (sigma ** 2)
 
 
@@ -269,31 +273,63 @@ class ConjunctionDetector:
         epoch1: datetime,
         epoch2: datetime
     ) -> float:
+        """
+        Computes the Mahalanobis distance at TCA using summed position covariance.
+        """
         delta_r = state2.r - state1.r
 
         dt1 = (tca - epoch1).total_seconds()
         dt2 = (tca - epoch2).total_seconds()
-        P = CovarianceModel.build_covariance_matrix(dt1, False) + CovarianceModel.build_covariance_matrix(dt2, False)
+
+        P = (
+            CovarianceModel.build_covariance_matrix(dt1, False) +
+            CovarianceModel.build_covariance_matrix(dt2, False)
+        )
 
         try:
             invP = np.linalg.inv(P)
-            return float(np.sqrt(delta_r @ invP @ delta_r))
+            d2 = float(delta_r @ invP @ delta_r)
+            return math.sqrt(max(d2, 0.0))
         except np.linalg.LinAlgError:
+            # Fallback: Euclidean distance (conservative)
             return float(np.linalg.norm(delta_r))
 
-    def _collision_probability(self, min_distance: float, combined_hbr: float, mahalanobis_distance: float) -> float:
+    def _collision_probability(
+        self,
+        min_distance: float,
+        combined_hbr: float,
+        mahalanobis_distance: float
+    ) -> float:
         """
-        Chan 1D approximation — kept identical to preserve output behavior.
+        Alfano (2005) 2D collision probability model.
+
+      
+        Assumes circular hard-body region and Gaussian relative position uncertainty.
         """
-        if mahalanobis_distance <= 0 or combined_hbr <= 0 or min_distance <= 0:
+        if min_distance <= 0.0 or combined_hbr <= 0.0 or mahalanobis_distance <= 0.0:
             return 0.0
 
+        # Convert Mahalanobis distance to equivalent 1-sigma scale
         sigma = min_distance / mahalanobis_distance
-        if sigma <= 0:
+        if sigma <= 0.0:
             return 0.0
 
-        exponent = -0.5 * (min_distance / sigma) ** 2
-        pc = (combined_hbr ** 2 / (2.0 * sigma ** 2)) * math.exp(exponent)
+        # Normalized miss distance and hard-body radius
+        alpha = min_distance / sigma          # normalized separation
+        beta = combined_hbr / sigma           # normalized hard-body radius
+
+        # Alfano exact 2D Gaussian probability
+        if alpha >= beta:
+            # Miss distance outside hard-body region
+            pc = (beta ** 2 / (2.0 * alpha ** 2)) * math.exp(-0.5 * alpha ** 2)
+        else:
+            # Miss distance penetrates hard-body region
+            term1 = math.exp(-0.5 * alpha ** 2)
+            term2 = math.acos(alpha / beta)
+            pc = (1.0 / math.pi) * (
+                term1 * term2 +
+                math.exp(-0.5 * beta ** 2) * (beta - alpha)
+            )
 
         return float(max(0.0, min(1.0, pc)))
 
@@ -329,7 +365,13 @@ class ConjunctionSearch:
     - Parallel refinement + Pc computation
     """
 
-    def __init__(self, detector: ConjunctionDetector, parallel: bool = True, use_processes: bool = True, max_workers: Optional[int] = None):
+    def __init__(
+        self,
+        detector: ConjunctionDetector,
+        parallel: bool = True,
+        use_processes: bool = True,
+        max_workers: Optional[int] = None
+    ):
         self.detector = detector
         self.parallel = parallel
         self.use_processes = use_processes
