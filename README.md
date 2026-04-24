@@ -251,35 +251,23 @@ Propagates all objects over the time horizon at `search_step_hours` resolution. 
 For each candidate pair, uses `scipy.optimize.minimize_scalar` (bounded Brent's method) to find the precise Time of Closest Approach within a ±`refine_window_hours` bracket around the grid minimum.
 
 **Collision Probability:**  
-Alfano 2D Pc approximation:
-Collision probability is estimated using a simplified **Alfano 2D Gaussian approximation**, assuming:
 
-- Gaussian relative position uncertainty  
-- Circular hard-body collision region  
-- Isotropic equivalent covariance (scalar σ)
+Collision probability is estimated using a simplified **Alfano 2D Gaussian approach**, a widely used method in space situational awareness.
 
-The probability of collision \( P_c \) is computed as:
+In simple terms, the model:
 
-\[
-P_c \approx
-\begin{cases}
-\frac{\beta^2}{2\alpha^2} \, e^{-\alpha^2/2}, & \text{if } \alpha \ge \beta \\
-\frac{1}{\pi} \left[
-e^{-\alpha^2/2} \cos^{-1}\!\left(\frac{\alpha}{\beta}\right)
-+ e^{-\beta^2/2} (\beta - \alpha)
-\right], & \text{if } \alpha < \beta
-\end{cases}
-\]
+- Treats the relative position uncertainty between two objects as a **Gaussian (bell-shaped) distribution**
+- Assumes a **circular collision region** based on the combined physical sizes of the objects (hard-body radius)
+- Uses a single equivalent uncertainty value (σ) to approximate the spread of possible positions
 
-Where:
+The probability of collision depends on two key factors:
 
-- \( \alpha = \dfrac{d}{\sigma} \) — normalized miss distance  
-- \( \beta = \dfrac{R}{\sigma} \) — normalized hard-body radius  
-- \( d \) — miss distance at TCA  
-- \( R \) — combined hard-body radius  
-- \( \sigma \) — equivalent 1σ relative position uncertainty  
+- **Miss distance** — how close the objects come at the Time of Closest Approach (TCA)
+- **Uncertainty** — how large the positional uncertainty is at that time
 
-This formulation provides a fast, closed-form approximation of the Alfano collision probability model suitable for large catalog screening.
+These are combined into a normalized measure that determines how much the uncertainty region overlaps with the collision radius.
+
+This implementation uses a **fast analytical approximation** of the :contentReference[oaicite:0]{index=0}, making it suitable for large-scale catalog screening and ranking of conjunction events.
 
 
 ---
